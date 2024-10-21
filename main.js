@@ -1,19 +1,24 @@
-// imports
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as dat from 'dat.gui';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+const BLOOM_LAYER = 1;
+const bloomLayer = new THREE.Layers();
+bloomLayer.set(BLOOM_LAYER);
 
 // Constants for the galaxy
-const GALAXY_THICKNESS = 5;
+const GALAXY_THICKNESS = 9;
 const CORE_X_DIST = 33;
 const CORE_Y_DIST = 33;
 const ARM_X_DIST = 100;
 const ARM_Y_DIST = 50;
 const ARM_X_MEAN = 200;
 const ARM_Y_MEAN = 100;
-const SPIRAL_TIGHTNESS = 1.5;  // Higher values make a tighter spiral
-const ARMS = 4;                // Number of arms in the galaxy
-const SPIRAL_ANGLE_OFFSET = Math.PI / 3;  // Controls the winding of the arms
+const SPIRAL = 5;  // Strength of the spiral force
+const ARMS = 2;      // Number of arms in the galaxy
 
 // Define star colors based on types with more warm colors
 const starColors = {
@@ -53,17 +58,47 @@ controls.enableDamping = true;
 // Parameters for the galaxy
 const params = {
     starCount: 10000,       // Number of stars
-    armSeparation: 0.5,     // Tightness of spiral arms
+    armSeparation: 0.1,     // Tightness of spiral arms
     numArms: 4,             // Number of spiral arms
     coreRadius: 1,          // Radius of the galactic core
     armWidth: 0.2,          // Width of each spiral arm
-    noiseFactor: 0.2,       // Randomness in star placement
+    noiseFactor: 0.5,       // Randomness in star placement
     zSpread: 0.3,           // Spread in Z-axis for a 3D effect
-    colorByDistance: true   // Color stars based on distance
+    colorByDistance: true,  // Color stars based on distance
+    density: 5              // Density of stars in the spiral arms
 };
 
 // Function to create the galaxy's stars
 let starField;
+
+function generateObject(numStars, generator) {
+    let objects = [];
+
+    // Inner core stars
+    for (let i = 0; i < numStars / 4; i++) {
+        let pos = new THREE.Vector3(gaussianRandom(0, CORE_X_DIST), gaussianRandom(0, CORE_Y_DIST), gaussianRandom(0, GALAXY_THICKNESS));
+        let obj = generator(pos);
+        objects.push(obj);
+    }
+
+    // Outer core stars
+    for (let i = 0; i < numStars / 4; i++) {
+        let pos = new THREE.Vector3(gaussianRandom(0, ARM_X_DIST), gaussianRandom(0, ARM_Y_DIST), gaussianRandom(0, GALAXY_THICKNESS));
+        let obj = generator(pos);
+        objects.push(obj);
+    }
+
+    // Spiral arm stars
+    for (let j = 0; j < ARMS; j++) {
+        for (let i = 0; i < numStars / 4; i++) {
+            let pos = spiral(gaussianRandom(ARM_X_MEAN, ARM_X_DIST), gaussianRandom(ARM_Y_MEAN, ARM_Y_DIST), gaussianRandom(0, GALAXY_THICKNESS), j * 2 * Math.PI / ARMS);
+            let obj = generator(pos);
+            objects.push(obj);
+        }
+    }
+
+    return objects;
+}
 
 function generateGalaxy() {
     if (starField) scene.remove(starField); // Remove the old starfield when parameters change
@@ -73,28 +108,8 @@ function generateGalaxy() {
     const colors = [];
     const sizes = [];
 
-    const arms = params.numArms; // Number of spiral arms
-    const density = 5; // Stars per arm
-    const a = 1; // Constant for Archimedean spiral
-    const b = 0.1; // Constant for Archimedean spiral
-
-    for (let i = 0; i < params.starCount; i++) {
-        // Calculate the angle and radius for spiral placement
-        let armIndex = i % arms;
-        let angle = (i / density) * (Math.PI * 2) / arms + armIndex * params.armSeparation; // Spiral angle
-        let radius = a + b * angle; // Archimedean spiral radius
-
-        // Add noise to the radius and angle
-        radius += (Math.random() - 0.5) * params.noiseFactor;
-        angle += (Math.random() - 0.5) * params.noiseFactor;
-
-        // Calculate x, y positions in a spiral pattern
-        let x = radius * Math.cos(angle);
-        let y = radius * Math.sin(angle);
-        let z = normalDistribution(0, params.zSpread); // Slight random z offset for depth
-
-        // Set positions for each star (x, y, z)
-        positions.push(x, y, z);
+    const stars = generateObject(params.starCount, (pos) => {
+        positions.push(pos.x, pos.y, pos.z);
 
         // Get a random star type and corresponding color
         const starType = getRandomStarType();
@@ -107,7 +122,9 @@ function generateGalaxy() {
 
         // Set a default size for each star
         sizes.push(1.0);
-    }
+
+        return pos;
+    });
 
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -122,6 +139,7 @@ function generateGalaxy() {
 
     // Create the points (stars) from the geometry
     starField = new THREE.Points(geometry, material);
+    starField.layers.enable(BLOOM_LAYER);
     scene.add(starField);
 }
 
@@ -136,7 +154,7 @@ function getRandomStarType() {
             return type;
         }
     }
-    return 'terrence'; // edge case
+    return 'M'; // Default to M type if not assigned
 }
 
 // Normal distribution function for z offset
@@ -145,6 +163,23 @@ function normalDistribution(mean, stdev) {
     let v = Math.random();
     let z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
     return z * stdev + mean;
+}
+
+// Gaussian random function
+export function gaussianRandom(mean = 0, stdev = 1) {
+    let u = 1 - Math.random();
+    let v = Math.random();
+    let z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    return z * stdev + mean;
+}
+
+// Spiral function
+function spiral(x, y, z, offset) {
+    let r = Math.sqrt(x**2 + y**2);
+    let theta = offset;
+    theta += x > 0 ? Math.atan(y / x) : Math.atan(y / x) + Math.PI;
+    theta += (r / ARM_X_DIST) * SPIRAL;
+    return new THREE.Vector3(r * Math.cos(theta), r * Math.sin(theta), z);
 }
 
 // Call the galaxy generation function
@@ -160,19 +195,32 @@ gui.add(params, 'armWidth', 0.1, 1).onChange(generateGalaxy);
 gui.add(params, 'noiseFactor', 0, 1).onChange(generateGalaxy);
 gui.add(params, 'zSpread', 0, 2).onChange(generateGalaxy); 
 gui.add(params, 'colorByDistance').onChange(generateGalaxy);
+gui.add(params, 'density', 1, 10).onChange(generateGalaxy); // Add density control
+
+// Create the bloom composer
+const renderScene = new RenderPass(scene, camera);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+bloomPass.threshold = 0;
+bloomPass.strength = 1.5;
+bloomPass.radius = 0;
+
+const bloomComposer = new EffectComposer(renderer);
+bloomComposer.addPass(renderScene);
+bloomComposer.addPass(bloomPass);
 
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+    bloomComposer.render();
 }
 
 animate();
 
 // Handle window resize
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight; 
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
