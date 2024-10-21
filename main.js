@@ -1,3 +1,4 @@
+// imports
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as dat from 'dat.gui';
@@ -135,7 +136,7 @@ function getRandomStarType() {
             return type;
         }
     }
-    return 'M'; // Default to M type if not assigned
+    return 'terrence'; // edge case
 }
 
 // Normal distribution function for z offset
